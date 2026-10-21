@@ -19,7 +19,7 @@ if UNISHARP_PYTHON.is_file() and Path(sys.executable).resolve() != UNISHARP_PYTH
     os.execv(str(UNISHARP_PYTHON), [str(UNISHARP_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
 
 import gradio as gr
-from moge_gui import build_moge_tab
+from moge_gui import build_moge_tab, blender_executable
 
 
 SCRIPTS = REPO_ROOT / "scripts"
@@ -131,13 +131,13 @@ def _header_html(language: str) -> str:
     return (
         "<div id='unisharp-header'><h1>"
         f"{_t(language, 'title')}</h1>"
-        "<a href='https://github.com/Insta360-Research-Team/UniSHARP' target='_blank' rel='noopener'>GitHub ↗</a></div>"
+        "<a href='https://github.com/tardis7732/UniSHARP-MoGe-Blender-Workflow' target='_blank' rel='noopener'>GitHub ↗</a></div>"
     )
 
 
 def _blender_executable() -> str:
-    """Use an explicitly configured executable or the `blender` command on PATH."""
-    return os.environ.get("BLENDER_EXE", "blender")
+    """Share executable discovery with the MoGe tab, including Windows installs."""
+    return blender_executable()
 
 
 def _ensure_checkpoint(language: str) -> Path:
