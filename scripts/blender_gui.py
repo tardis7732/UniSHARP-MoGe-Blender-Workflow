@@ -377,14 +377,15 @@ CUSTOM_CSS = """
         #unisharp-header a:hover { color: #f0f6fc; text-decoration: underline; }
         #section-basic, #section-input, #section-options, #section-result, .workflow-section {
             border: 0;
-            border-left: 3px solid #6e7681;
             border-radius: 0;
-            padding: 0.05rem 0 0.05rem 0.65rem;
-            margin: 1.1rem 0 0.55rem;
+            padding: 0;
+            margin: 0;
         }
         #section-basic h3, #section-input h3, #section-options h3, #section-result h3, .workflow-section h3 {
             color: inherit;
-            margin: 0;
+            border-left: 3px solid #6e7681;
+            padding: 0.05rem 0 0.05rem 0.65rem;
+            margin: 1.1rem 0 0.55rem;
         }
         #generate-button { margin: 0.8rem 0; }
 """

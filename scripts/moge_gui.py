@@ -9,7 +9,6 @@ from datetime import datetime
 from uuid import uuid4
 
 import gradio as gr
-from moge_image import original_height
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT/'scripts'
@@ -114,35 +113,23 @@ def open_blend(path):
 
 
 
-def generate_moge_default(image, folder, width, height, lock_aspect, background, metric_reference, mesh_fbx, camera_fbx, progress=gr.Progress()):
+def generate_moge_default(image, folder, lock_aspect, background, metric_reference, mesh_fbx, camera_fbx, progress=gr.Progress()):
     """Expose workflow options while retaining the tested model settings."""
-    return generate_moge(image, folder, 'ViT-L (기본 / default)', width, height, lock_aspect,
+    return generate_moge(image, folder, 'ViT-L (기본 / default)', 1536, 864, lock_aspect,
                          1200, .04, background, metric_reference, mesh_fbx,
                          progress=progress, save_camera_fbx=camera_fbx)
-
-
-def resolution_settings(image, width, locked):
-    if width is None:
-        return gr.update(interactive=not locked)
-    if locked:
-        height = original_height(image, width) if image else round(int(width)*9/16)
-        return gr.update(value=height, interactive=False)
-    return gr.update(interactive=True)
 
 
 def build_moge_tab(default_output):
     gr.Markdown('### 기본 설정', elem_classes='workflow-section')
     folder = gr.Textbox(value=str(Path(default_output)/'MoGe3'), label='출력 폴더')
     with gr.Row():
-        width = gr.Number(value=1536, minimum=256, maximum=4096, precision=0, label='출력 가로 px')
-        height = gr.Number(value=864, minimum=128, maximum=8192, precision=0, interactive=False, label='출력 세로 px')
-    with gr.Row():
         with gr.Column(scale=3):
             gr.Markdown('### 입력 이미지', elem_classes='workflow-section')
             image = gr.File(label='이미지 추가', file_types=['image'], type='filepath', height=305)
         with gr.Column(scale=2):
             gr.Markdown('### 옵션', elem_classes='workflow-section')
-            lock_aspect = gr.Checkbox(value=True, label='원본 화면비 고정', info='가로 변경 시 세로 자동 계산. 해제하면 지정 비율로 중앙 크롭합니다.')
+            lock_aspect = gr.Checkbox(value=True, label='원본 화면비 고정', info='원본 비율을 유지합니다. 해제하면 16:9로 중앙 크롭합니다.')
             background = gr.Checkbox(value=True, label='원본 이미지를 카메라 배경으로 포함')
             metric_reference = gr.Checkbox(value=True, label='1m 레퍼런스 큐브 포함')
             mesh_fbx = gr.Checkbox(value=True, label='Unreal용 메시 FBX 저장')
@@ -153,8 +140,6 @@ def build_moge_tab(default_output):
     blend = gr.Textbox(label='생성된 Blender 파일', interactive=False)
     open_button = gr.Button('Blender에서 열기')
     status = gr.Markdown()
-    for component in (image, width, lock_aspect):
-        component.change(resolution_settings, inputs=[image, width, lock_aspect], outputs=height, queue=False)
-    generate.click(generate_moge_default, inputs=[image, folder, width, height, lock_aspect, background, metric_reference, mesh_fbx, camera_fbx],
+    generate.click(generate_moge_default, inputs=[image, folder, lock_aspect, background, metric_reference, mesh_fbx, camera_fbx],
                    outputs=[files, blend, status], concurrency_id='gpu_conversion', concurrency_limit=1)
     open_button.click(open_blend, inputs=blend, outputs=status)
