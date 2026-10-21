@@ -21,7 +21,6 @@ def main():
     p.add_argument('--width', type=int, default=1536)
     p.add_argument('--height', type=int, help='Omit to lock source aspect ratio; otherwise center-crop to this frame.')
     p.add_argument('--tokens', type=int, default=1200)
-    p.add_argument('--camera-json')
     a = p.parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError('MoGe-3 requires a CUDA GPU in this workflow.')
@@ -30,18 +29,12 @@ def main():
     out = Path(a.output).resolve(); out.mkdir(parents=True, exist_ok=True)
     im, sample = prepare_photo(a.input, a.width, a.height)
     im.save(out/'texture.png')
-    fov = None
-    if a.camera_json:
-        ref = json.loads(Path(a.camera_json).read_text(encoding='utf-8'))
-        if abs(sample.width/sample.height - ref['aspect']) > 0.01:
-            raise ValueError('Reference camera aspect ratio does not match this image. Use the original photo.')
-        fov = float(np.degrees(2*np.arctan(ref['sensor_width']/(2*ref['lens']))))
     print('Loading', a.model, flush=True)
     model = MoGeModel.from_pretrained(a.checkpoint or a.model).to('cuda').eval()
     x = torch.from_numpy(np.asarray(sample, dtype=np.float32)/255).permute(2, 0, 1).to('cuda')
     started = time.monotonic()
     with torch.inference_mode():
-        result = model.infer(x, num_tokens=a.tokens, refine_steps=3, fov_x=fov, use_fp16=True)
+        result = model.infer(x, num_tokens=a.tokens, refine_steps=3, use_fp16=True)
     result = {k: v.detach().cpu().numpy() for k, v in result.items()}
     depth = result['depth'].astype(np.float32)
     view, valid = inverse_depth_preview(depth, result['mask'])
@@ -54,10 +47,11 @@ def main():
         'model': a.model, 'quantized': False, 'inference_fp16': True,
         'tokens': a.tokens, 'refine_steps': 3, 'resolution': list(sample.size),
         'aspect_mode': 'original' if a.height is None else 'center_crop',
-        'fov_override': fov, 'intrinsics': result['intrinsics'].tolist(),
+        'camera_source': 'MoGe estimated intrinsics', 'intrinsics': result['intrinsics'].tolist(),
+        'depth_units': 'estimated meters',
         'seconds': time.monotonic()-started,
         'png': 'Normalized inverse depth: near white, far black. Invalid pixels black.',
-        'tiff': 'Raw model camera Z; invalid pixels zero. Not median-aligned to reference scene.'
+        'tiff': 'Raw model camera Z in estimated meters; invalid pixels zero.'
     }, indent=2), encoding='utf-8')
     print('MoGe inference complete', flush=True)
 

@@ -7,14 +7,15 @@
 - 공식 비양자화 ViT-L / ViT-G 모델 선택, 입력 해상도와 디테일 조절
 - 원본 화면비 고정(기본), 가로·세로 해상도 설정. 고정 해제 시 중앙 크롭.
 - 이미지 → 깊이맵 → UV 텍스처 삼각형 메시 → `.blend`
-- 기존 워크플로우 `.blend`의 저장된 카메라 위치·회전·렌즈 복사 (선택)
+- 이미지 투영과 일치하는 기본 카메라 자동 생성
+- 카메라 원본 이미지 배경과 1m 레퍼런스 큐브 포함 옵션
 - 모델이 추정한 원본 시점 깊이맵 저장 (별도 카메라 렌더 없음)
 - Unreal Static Mesh용 **FBX + 원본 텍스처 + 카메라 FBX**
 - 생성된 파일을 Blender에서 바로 열기
 
 `Run_UniSHARP_UI.bat`으로 기본 환경을 설치한 뒤 **`Setup_MoGe.bat`을 최초 1회 실행**하고, UI의 **MoGe-3 · Depth Mesh** 탭을 선택하세요. 설치에는 Git도 필요합니다. 기본 모델은 ViT-L이며 ViT-G는 더 많은 VRAM이 필요합니다. [MoGe/Unreal 사용 안내](docs/MOGE_UNREAL.md)
 
-사진에 가려진 뒷면은 생성하지 않습니다. 카메라를 옮기면 구멍이 나타날 수 있습니다. 참조 장면의 크기는 중앙 깊이로 맞추므로 서로 다른 추정 모델 사이의 정합은 근사입니다.
+사진에 가려진 뒷면은 생성하지 않습니다. 카메라를 옮기면 구멍이 나타날 수 있습니다. MoGe의 미터 단위 추정을 그대로 사용하며, 1m 큐브는 크기 비교 기준입니다. 사진에서 추정한 절대 크기에는 오차가 있을 수 있습니다.
 
 > [Insta360 Research Team의 UniSHARP](https://github.com/Insta360-Research-Team/UniSHARP)를 기반으로 한 비공식 워크플로우입니다. 연구 코드·논문·모델의 원본 정보는 [UniSHARP 원본 저장소](https://github.com/Insta360-Research-Team/UniSHARP)를 참고하세요.
 

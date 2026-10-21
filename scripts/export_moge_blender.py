@@ -15,7 +15,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--folder', required=True)
     p.add_argument('--name', required=True)
-    p.add_argument('--camera-json')
+    p.add_argument('--no-background', action='store_true')
+    p.add_argument('--no-metric-reference', action='store_true')
     p.add_argument('--edge-threshold', type=float, default=0.04)
     p.add_argument('--fbx', action='store_true')
     a = p.parse_args(sys.argv[sys.argv.index('--')+1:])
@@ -24,20 +25,12 @@ def main():
     depth, mask, k = data['depth'], data['mask'], data['intrinsics'].copy()
     h, w = depth.shape
     axes = np.array([[0, 0, -1, 0], [1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]], float)
-    ref, scale = None, 1.0
-    if a.camera_json:
-        ref = json.loads(Path(a.camera_json).read_text(encoding='utf-8'))
-        axes = np.array(ref['axes'])
-        scale = ref['median_z']/float(np.median(depth[mask]))
-        fx = ref['lens']/ref['sensor_width']
-        k = np.array([[fx, 0, .5-ref['shift'][0]],
-                      [0, fx*w/h/ref['pixel_aspect'], .5+ref['shift'][1]*w/h/ref['pixel_aspect']],
-                      [0, 0, 1]])
-    verts, faces, uv = depth_mesh(depth, mask, k, a.edge_threshold, scale)
+    verts, faces, uv = depth_mesh(depth, mask, k, a.edge_threshold)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     s = bpy.context.scene
     s.unit_settings.system = 'METRIC'
     s.unit_settings.scale_length = 1.0
+    s.unit_settings.length_unit = 'METERS'
     root = bpy.data.objects.new('Depth scene - move this', None)
     s.collection.objects.link(root)
     mesh = bpy.data.meshes.new('MoGe-3 depth surface')
@@ -51,7 +44,8 @@ def main():
     obj = bpy.data.objects.new('MoGe-3 textured depth mesh', mesh)
     s.collection.objects.link(obj); obj.parent = root
     obj.matrix_world = Matrix(axes.tolist())
-    obj['depth_to_scene_scale'] = scale
+    obj['depth_to_scene_scale'] = 1.0
+    obj['depth_units'] = 'estimated meters'
     obj['source'] = 'MoGe-3; visible surfaces only; hidden geometry is not reconstructed.'
     image = bpy.data.images.load(str(out/'texture.png')); image.pack()
     mat = bpy.data.materials.new('Photo - unlit'); mat.use_nodes = True
@@ -78,9 +72,18 @@ def main():
         return ob
 
     source = camera('01 Original photo camera', axes@np.diag([1, -1, -1, 1]))
-    target = camera('02 Your saved Blender camera', np.array(ref['matrix']),
-                    ref['target_lens'], ref['target_sensor_width'], ref['target_shift']) if ref else source
-    s.camera = target
+    s.camera = source
+    if not a.no_background:
+        source.data.show_background_images = True
+        background = source.data.background_images.new()
+        background.image = image
+        background.alpha = .75
+        background.display_depth = 'BACK'
+    if not a.no_metric_reference:
+        from make_blender_camera_preview import add_metric_reference_cube
+        cube = add_metric_reference_cube()
+        cube.hide_render = True
+        cube['purpose'] = 'World-space 1 m reference; not an inferred object or a scale calibration.'
     s.render.engine = 'BLENDER_EEVEE'; s.eevee.taa_render_samples = 32
     s.render.resolution_x = w
     s.render.resolution_y = h
@@ -92,6 +95,7 @@ def main():
     s.view_settings.exposure = 0; s.view_settings.gamma = 1
     s.world = bpy.data.worlds.new('Neutral world'); s.world.use_nodes = True
     s.world.node_tree.nodes['Background'].inputs['Strength'].default_value = 0
+    bpy.ops.object.select_all(action='DESELECT')
     bpy.context.view_layer.objects.active = obj; obj.select_set(True)
     for screen in bpy.data.screens:
         for area in screen.areas:
@@ -101,8 +105,9 @@ def main():
     bpy.data.texts.new('READ ME').write(
         'MoGe-3 textured depth mesh.\nNumpad 0: camera view. N > View > Lock Camera to View: move the camera.\n'
         'The original photograph is packed into this file. Hidden surfaces are missing.\n'
-        'A reference camera is copied from the saved file, not live-linked.\n'
-        f'Model depth to scene scale: {scale}. Reference alignment uses median depth.\n'
+        'The default camera uses the same estimated intrinsics as the mesh projection.\n'
+        'Scene coordinates preserve MoGe estimated meters (1 Blender unit = 1 meter).\n'
+        'The optional 1 m reference cube is independent of the scene root and excluded from FBX export.\n'
         'Unreal: import FBX as Static Mesh; import texture.png; use Unlit, Texture RGB -> Emissive Color.\n')
     blend = out/f'{a.name}_moge3.blend'
     bpy.ops.wm.save_as_mainfile(filepath=str(blend))
@@ -121,12 +126,14 @@ def main():
             bake_anim=False, add_leaf_bones=False, path_mode='COPY', embed_textures=True)
         mesh.materials[0] = mat
         from make_blender_camera_preview import export_unreal_camera_fbx
-        export_unreal_camera_fbx(target, out/f'{a.name}_unreal_camera.fbx')
+        export_unreal_camera_fbx(source, out/f'{a.name}_unreal_camera.fbx')
     (out/'mesh_info.json').write_text(json.dumps({
-        'vertices': len(verts), 'triangles': len(faces), 'scale': scale,
-        'edge_threshold': a.edge_threshold, 'active_camera': target.name,
-        'reference_camera': bool(ref), 'pixel_aspect': pixel_aspect,
-        'intrinsics': k.tolist(), 'camera_matrix': [list(row) for row in target.matrix_world]
+        'vertices': len(verts), 'triangles': len(faces), 'scale': 1.0,
+        'units': 'estimated meters',
+        'edge_threshold': a.edge_threshold, 'active_camera': source.name,
+        'camera_source': 'MoGe estimated intrinsics', 'pixel_aspect': pixel_aspect,
+        'camera_background': not a.no_background, 'metric_reference_cube': not a.no_metric_reference,
+        'intrinsics': k.tolist(), 'camera_matrix': [list(row) for row in source.matrix_world]
     }, indent=2), encoding='utf-8')
     print('Blender and FBX export complete.', flush=True)
 

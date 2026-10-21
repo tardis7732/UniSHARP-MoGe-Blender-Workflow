@@ -54,11 +54,9 @@ def run(command, label):
         raise gr.Error(f'{label}\n{(result.stdout + result.stderr)[-5000:]}')
 
 
-def generate_moge(image, folder, model_name, width, height, lock_aspect, tokens, edge, reference, save_fbx, progress=gr.Progress()):
+def generate_moge(image, folder, model_name, width, height, lock_aspect, tokens, edge, include_background, include_metric_reference, save_fbx, progress=gr.Progress()):
     if not image or not Path(image).is_file():
         raise gr.Error('원본 사진을 선택해 주세요. / Select an original photograph.')
-    if reference and (not Path(reference).is_file() or Path(reference).suffix.lower() != '.blend'):
-        raise gr.Error('유효한 .blend 카메라 참조 파일을 선택해 주세요.')
     python, blender = moge_python(), blender_executable()
     if model_name not in MODELS:
         raise gr.Error('Unknown MoGe model.')
@@ -67,11 +65,6 @@ def generate_moge(image, folder, model_name, width, height, lock_aspect, tokens,
     name = ''.join(c if c.isalnum() or c in '-_' else '_' for c in Path(image).stem).strip('_') or 'image'
     out = Path(folder).expanduser().resolve()/f'{name}_MoGe3_{datetime.now():%Y%m%d_%H%M%S}_{uuid4().hex[:6]}'
     out.mkdir(parents=True, exist_ok=False)
-    camera_file = out/'reference_camera.json'
-    if reference:
-        progress(.05, desc='저장된 Blender 카메라 읽는 중 / Reading saved camera')
-        run([blender, '--background', '--factory-startup', '--python-exit-code', '1', '--disable-autoexec', str(Path(reference).resolve()),
-             '--python', str(SCRIPTS/'read_reference_camera.py'), '--', '--output', str(camera_file)], 'Camera read failed')
     progress(.15, desc='MoGe-3 추론 중 (첫 실행은 모델 다운로드) / MoGe inference')
     model_id = MODELS[model_name]
     command = [python, str(SCRIPTS/'infer_moge.py'), '--input', str(Path(image).resolve()), '--output', str(out),
@@ -83,14 +76,14 @@ def generate_moge(image, folder, model_name, width, height, lock_aspect, tokens,
     checkpoint = runtime_config().get('checkpoints', {}).get(model_id)
     if checkpoint and Path(checkpoint).is_file():
         command += ['--checkpoint', checkpoint]
-    if reference:
-        command += ['--camera-json', str(camera_file)]
     run(command, 'MoGe inference failed')
     progress(.65, desc='Blender 메시·FBX 내보내는 중 / Exporting')
     command = [blender, '--background', '--factory-startup', '--python-exit-code', '1', '--python', str(SCRIPTS/'export_moge_blender.py'),
                '--', '--folder', str(out), '--name', name, '--edge-threshold', str(float(edge))]
-    if reference:
-        command += ['--camera-json', str(camera_file)]
+    if not include_background:
+        command += ['--no-background']
+    if not include_metric_reference:
+        command += ['--no-metric-reference']
     if save_fbx:
         command += ['--fbx']
     run(command, 'Blender export failed')
@@ -131,9 +124,8 @@ def build_moge_tab(default_output):
     with gr.Row():
         with gr.Column():
             image = gr.File(label='원본 사진 / Original photo', file_types=['image'], type='filepath')
-            reference = gr.File(label='카메라 각도를 가져올 .blend (선택) / Saved workflow camera', file_types=['.blend'], type='filepath')
-            gr.Markdown('이 도구에서 만든 `.blend`를 넣으면 **저장된 활성 카메라**를 복사합니다. '
-                        '원본 사진과 화면 비율이 같아야 하며, 메시 크기는 중앙 깊이를 기준으로 맞춥니다.')
+            gr.Markdown('입력 이미지와 맞는 **기본 카메라를 자동 생성**합니다. '
+                        '원본 화면비 고정 해제 시에는 크롭된 이미지에 맞춥니다.')
         with gr.Column():
             folder = gr.Textbox(value=str(Path(default_output)/'MoGe3'), label='출력 폴더 / Output folder')
             model = gr.Dropdown(choices=list(MODELS), value=next(iter(MODELS)), label='모델 / Model')
@@ -145,6 +137,9 @@ def build_moge_tab(default_output):
                         '고정 해제 시 지정한 비율로 중앙 크롭합니다. 자동 렌더는 하지 않습니다.')
             tokens = gr.Slider(1200, 3600, value=1200, step=600, label='추론 디테일 / Inference tokens')
             edge = gr.Slider(.01, .20, value=.04, step=.01, label='깊이 경계 절단: 작을수록 구멍 증가 / Edge threshold')
+            background = gr.Checkbox(value=True, label='원본 이미지를 카메라 배경으로 포함')
+            metric_reference = gr.Checkbox(value=True, label='1m 레퍼런스 큐브 포함',
+                                          info='MoGe의 미터 단위 추정 크기를 유지합니다. 큐브는 비교 기준이며 추정 오차를 보정하지 않습니다.')
             fbx = gr.Checkbox(value=True, label='Unreal용 메시 FBX + 카메라 FBX + 텍스처 저장')
     generate = gr.Button('MoGe 메시·Blender 생성 / Generate', variant='primary')
     files = gr.File(label='생성 파일 / Generated files', file_count='multiple')
@@ -153,6 +148,6 @@ def build_moge_tab(default_output):
     status = gr.Markdown()
     for component in (image, width, lock_aspect):
         component.change(resolution_settings, inputs=[image, width, lock_aspect], outputs=height, queue=False)
-    generate.click(generate_moge, inputs=[image, folder, model, width, height, lock_aspect, tokens, edge, reference, fbx],
+    generate.click(generate_moge, inputs=[image, folder, model, width, height, lock_aspect, tokens, edge, background, metric_reference, fbx],
                    outputs=[files, blend, status], concurrency_id='gpu_conversion', concurrency_limit=1)
     open_button.click(open_blend, inputs=blend, outputs=status)
