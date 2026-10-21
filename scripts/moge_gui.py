@@ -9,6 +9,7 @@ from datetime import datetime
 from uuid import uuid4
 
 import gradio as gr
+from moge_image import original_height
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT/'scripts'
@@ -53,7 +54,9 @@ def run(command, label):
         raise gr.Error(f'{label}\n{(result.stdout + result.stderr)[-5000:]}')
 
 
-def generate_moge(image, folder, model_name, width, height, lock_aspect, tokens, edge, include_background, include_metric_reference, save_fbx, progress=gr.Progress()):
+def generate_moge(image, folder, model_name, width, height, lock_aspect, tokens, edge, include_background, include_metric_reference, save_fbx, progress=gr.Progress(), save_camera_fbx=None):
+    if save_camera_fbx is None:
+        save_camera_fbx = save_fbx
     if not image or not Path(image).is_file():
         raise gr.Error('원본 사진을 선택해 주세요. / Select an original photograph.')
     python, blender = moge_python(), blender_executable()
@@ -84,12 +87,16 @@ def generate_moge(image, folder, model_name, width, height, lock_aspect, tokens,
     if not include_metric_reference:
         command += ['--no-metric-reference']
     if save_fbx:
-        command += ['--fbx']
+        command += ['--mesh-fbx']
+    if save_camera_fbx:
+        command += ['--camera-fbx']
     run(command, 'Blender export failed')
     blend = out/f'{name}_moge3.blend'
     expected = [blend]
     if save_fbx:
-        expected += [out/f'{name}_unreal_mesh.fbx', out/f'{name}_unreal_camera.fbx', out/'texture.png']
+        expected += [out/f'{name}_unreal_mesh.fbx', out/'texture.png']
+    if save_camera_fbx:
+        expected += [out/f'{name}_unreal_camera.fbx']
     if any(not p.is_file() for p in expected):
         raise gr.Error('Export did not create all expected files. Inspect the output folder.')
     shutil.copyfile(ROOT/'docs/MOGE_UNREAL.md', out/'UNREAL_IMPORT.md')
@@ -107,23 +114,47 @@ def open_blend(path):
 
 
 
-def generate_moge_default(image, folder, progress=gr.Progress()):
-    """Simple image-to-Blender flow with the established defaults."""
-    return generate_moge(image, folder, 'ViT-L (기본 / default)', 1536, None, True,
-                         1200, .04, True, True, True, progress=progress)
+def generate_moge_default(image, folder, width, height, lock_aspect, background, metric_reference, mesh_fbx, camera_fbx, progress=gr.Progress()):
+    """Expose workflow options while retaining the tested model settings."""
+    return generate_moge(image, folder, 'ViT-L (기본 / default)', width, height, lock_aspect,
+                         1200, .04, background, metric_reference, mesh_fbx,
+                         progress=progress, save_camera_fbx=camera_fbx)
+
+
+def resolution_settings(image, width, locked):
+    if width is None:
+        return gr.update(interactive=not locked)
+    if locked:
+        height = original_height(image, width) if image else round(int(width)*9/16)
+        return gr.update(value=height, interactive=False)
+    return gr.update(interactive=True)
 
 
 def build_moge_tab(default_output):
     gr.Markdown('### 기본 설정', elem_classes='workflow-section')
     folder = gr.Textbox(value=str(Path(default_output)/'MoGe3'), label='출력 폴더')
-    gr.Markdown('### 입력 이미지', elem_classes='workflow-section')
-    image = gr.File(label='이미지 추가', file_types=['image'], type='filepath', height=305)
+    with gr.Row():
+        width = gr.Number(value=1536, minimum=256, maximum=4096, precision=0, label='출력 가로 px')
+        height = gr.Number(value=864, minimum=128, maximum=8192, precision=0, interactive=False, label='출력 세로 px')
+    with gr.Row():
+        with gr.Column(scale=3):
+            gr.Markdown('### 입력 이미지', elem_classes='workflow-section')
+            image = gr.File(label='이미지 추가', file_types=['image'], type='filepath', height=305)
+        with gr.Column(scale=2):
+            gr.Markdown('### 옵션', elem_classes='workflow-section')
+            lock_aspect = gr.Checkbox(value=True, label='원본 화면비 고정', info='가로 변경 시 세로 자동 계산. 해제하면 지정 비율로 중앙 크롭합니다.')
+            background = gr.Checkbox(value=True, label='원본 이미지를 카메라 배경으로 포함')
+            metric_reference = gr.Checkbox(value=True, label='1m 레퍼런스 큐브 포함')
+            mesh_fbx = gr.Checkbox(value=True, label='Unreal용 메시 FBX 저장')
+            camera_fbx = gr.Checkbox(value=True, label='Unreal용 카메라 FBX 저장')
     generate = gr.Button('Blender 파일 생성', variant='primary', size='lg')
     gr.Markdown('### 생성 결과', elem_classes='workflow-section')
     files = gr.File(label='생성된 파일', file_count='multiple')
     blend = gr.Textbox(label='생성된 Blender 파일', interactive=False)
     open_button = gr.Button('Blender에서 열기')
     status = gr.Markdown()
-    generate.click(generate_moge_default, inputs=[image, folder],
+    for component in (image, width, lock_aspect):
+        component.change(resolution_settings, inputs=[image, width, lock_aspect], outputs=height, queue=False)
+    generate.click(generate_moge_default, inputs=[image, folder, width, height, lock_aspect, background, metric_reference, mesh_fbx, camera_fbx],
                    outputs=[files, blend, status], concurrency_id='gpu_conversion', concurrency_limit=1)
     open_button.click(open_blend, inputs=blend, outputs=status)

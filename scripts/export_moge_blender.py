@@ -19,6 +19,8 @@ def main():
     p.add_argument('--no-metric-reference', action='store_true')
     p.add_argument('--edge-threshold', type=float, default=0.04)
     p.add_argument('--fbx', action='store_true')
+    p.add_argument('--mesh-fbx', action='store_true')
+    p.add_argument('--camera-fbx', action='store_true')
     a = p.parse_args(sys.argv[sys.argv.index('--')+1:])
     out = Path(a.folder).resolve()
     data = np.load(out/'depth_data.npz')
@@ -111,7 +113,7 @@ def main():
         'Unreal: import FBX as Static Mesh; import texture.png; use Unlit, Texture RGB -> Emissive Color.\n')
     blend = out/f'{a.name}_moge3.blend'
     bpy.ops.wm.save_as_mainfile(filepath=str(blend))
-    if a.fbx:
+    if a.fbx or a.mesh_fbx:
         # FBX understands Principled base-color textures. Unreal's final unlit
         # material must still be set explicitly, as documented in the guide.
         fbxmat = bpy.data.materials.new('Photo texture'); fbxmat.use_nodes = True
@@ -125,6 +127,7 @@ def main():
             apply_unit_scale=True, apply_scale_options='FBX_SCALE_UNITS',
             bake_anim=False, add_leaf_bones=False, path_mode='COPY', embed_textures=True)
         mesh.materials[0] = mat
+    if a.fbx or a.camera_fbx:
         from make_blender_camera_preview import export_unreal_camera_fbx
         export_unreal_camera_fbx(source, out/f'{a.name}_unreal_camera.fbx')
     (out/'mesh_info.json').write_text(json.dumps({
