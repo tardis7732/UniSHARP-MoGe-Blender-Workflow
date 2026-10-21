@@ -375,14 +375,14 @@ CUSTOM_CSS = """
         #unisharp-header h1 { margin: 0; }
         #unisharp-header a { color: #8b949e; font-size: 0.9rem; text-decoration: none; }
         #unisharp-header a:hover { color: #f0f6fc; text-decoration: underline; }
-        #section-basic, #section-input, #section-options, #section-result {
+        #section-basic, #section-input, #section-options, #section-result, .workflow-section {
             border: 0;
             border-left: 3px solid #6e7681;
             border-radius: 0;
             padding: 0.05rem 0 0.05rem 0.65rem;
             margin: 1.1rem 0 0.55rem;
         }
-        #section-basic h3, #section-input h3, #section-options h3, #section-result h3 {
+        #section-basic h3, #section-input h3, #section-options h3, #section-result h3, .workflow-section h3 {
             color: inherit;
             margin: 0;
         }
