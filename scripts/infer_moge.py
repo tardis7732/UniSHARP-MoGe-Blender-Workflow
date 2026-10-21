@@ -5,10 +5,11 @@ from pathlib import Path
 import time
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image
 import torch
 from moge.model.v3 import MoGeModel
 from moge_geometry import inverse_depth_preview
+from moge_image import prepare_photo
 
 
 def main():
@@ -18,6 +19,7 @@ def main():
     p.add_argument('--model', choices=['Ruicheng/moge-3-vitl', 'Ruicheng/moge-3-vitg'], default='Ruicheng/moge-3-vitl')
     p.add_argument('--checkpoint')
     p.add_argument('--width', type=int, default=1536)
+    p.add_argument('--height', type=int, help='Omit to lock source aspect ratio; otherwise center-crop to this frame.')
     p.add_argument('--tokens', type=int, default=1200)
     p.add_argument('--camera-json')
     a = p.parse_args()
@@ -26,16 +28,12 @@ def main():
     if not 256 <= a.width <= 4096 or not 1200 <= a.tokens <= 3600:
         raise ValueError('Width must be 256..4096; tokens must be 1200..3600.')
     out = Path(a.output).resolve(); out.mkdir(parents=True, exist_ok=True)
-    im = ImageOps.exif_transpose(Image.open(a.input)).convert('RGB')
-    if not 0.5 <= im.width/im.height <= 2:
-        raise ValueError('MoGe expects an ordinary photo with aspect ratio between 1:2 and 2:1.')
+    im, sample = prepare_photo(a.input, a.width, a.height)
     im.save(out/'texture.png')
-    width = min(a.width, im.width)
-    sample = im.resize((width, max(2, round(im.height*width/im.width))), Image.Resampling.LANCZOS)
     fov = None
     if a.camera_json:
         ref = json.loads(Path(a.camera_json).read_text(encoding='utf-8'))
-        if abs(im.width/im.height - ref['aspect']) > 0.01:
+        if abs(sample.width/sample.height - ref['aspect']) > 0.01:
             raise ValueError('Reference camera aspect ratio does not match this image. Use the original photo.')
         fov = float(np.degrees(2*np.arctan(ref['sensor_width']/(2*ref['lens']))))
     print('Loading', a.model, flush=True)
@@ -55,6 +53,7 @@ def main():
     (out/'model_info.json').write_text(json.dumps({
         'model': a.model, 'quantized': False, 'inference_fp16': True,
         'tokens': a.tokens, 'refine_steps': 3, 'resolution': list(sample.size),
+        'aspect_mode': 'original' if a.height is None else 'center_crop',
         'fov_override': fov, 'intrinsics': result['intrinsics'].tolist(),
         'seconds': time.monotonic()-started,
         'png': 'Normalized inverse depth: near white, far black. Invalid pixels black.',

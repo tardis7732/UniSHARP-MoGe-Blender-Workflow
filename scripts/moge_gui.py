@@ -9,6 +9,7 @@ from datetime import datetime
 from uuid import uuid4
 
 import gradio as gr
+from moge_image import original_height
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT/'scripts'
@@ -53,7 +54,7 @@ def run(command, label):
         raise gr.Error(f'{label}\n{(result.stdout + result.stderr)[-5000:]}')
 
 
-def generate_moge(image, folder, model_name, width, tokens, edge, reference, save_fbx, progress=gr.Progress()):
+def generate_moge(image, folder, model_name, width, height, lock_aspect, tokens, edge, reference, save_fbx, progress=gr.Progress()):
     if not image or not Path(image).is_file():
         raise gr.Error('원본 사진을 선택해 주세요. / Select an original photograph.')
     if reference and (not Path(reference).is_file() or Path(reference).suffix.lower() != '.blend'):
@@ -75,13 +76,17 @@ def generate_moge(image, folder, model_name, width, tokens, edge, reference, sav
     model_id = MODELS[model_name]
     command = [python, str(SCRIPTS/'infer_moge.py'), '--input', str(Path(image).resolve()), '--output', str(out),
                '--model', model_id, '--width', str(int(width)), '--tokens', str(int(tokens))]
+    if not lock_aspect:
+        if height is None:
+            raise gr.Error('세로 해상도를 입력해 주세요. / Enter a height.')
+        command += ['--height', str(int(height))]
     checkpoint = runtime_config().get('checkpoints', {}).get(model_id)
     if checkpoint and Path(checkpoint).is_file():
         command += ['--checkpoint', checkpoint]
     if reference:
         command += ['--camera-json', str(camera_file)]
     run(command, 'MoGe inference failed')
-    progress(.65, desc='Blender 메시·뎁스맵·FBX 내보내는 중 / Exporting')
+    progress(.65, desc='Blender 메시·FBX 내보내는 중 / Exporting')
     command = [blender, '--background', '--factory-startup', '--python-exit-code', '1', '--python', str(SCRIPTS/'export_moge_blender.py'),
                '--', '--folder', str(out), '--name', name, '--edge-threshold', str(float(edge))]
     if reference:
@@ -89,9 +94,8 @@ def generate_moge(image, folder, model_name, width, tokens, edge, reference, sav
     if save_fbx:
         command += ['--fbx']
     run(command, 'Blender export failed')
-    run([python, str(SCRIPTS/'convert_moge_depth.py'), str(out)], 'Depth conversion failed')
     blend = out/f'{name}_moge3.blend'
-    expected = [blend, out/'camera_preview.png', out/'camera_depth_16bit.png']
+    expected = [blend]
     if save_fbx:
         expected += [out/f'{name}_unreal_mesh.fbx', out/f'{name}_unreal_camera.fbx', out/'texture.png']
     if any(not p.is_file() for p in expected):
@@ -99,7 +103,7 @@ def generate_moge(image, folder, model_name, width, tokens, edge, reference, sav
     shutil.copyfile(ROOT/'docs/MOGE_UNREAL.md', out/'UNREAL_IMPORT.md')
     files = sorted(str(p) for p in out.iterdir() if p.is_file() and p.suffix not in {'.npz', '.npy'})
     progress(1, desc='완료 / Complete')
-    return files, str(out/'camera_preview.png'), str(out/'camera_depth_preview.png'), str(blend), f'완료 / Done: {out}'
+    return files, str(blend), f'완료 / Done: {out}'
 
 
 def open_blend(path):
@@ -108,6 +112,15 @@ def open_blend(path):
     subprocess.Popen([blender_executable(), '--disable-autoexec', str(Path(path).resolve())],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return 'Blender를 열었습니다. / Opened Blender on the machine running this UI.'
+
+
+def resolution_settings(image, width, locked):
+    if width is None:
+        return gr.update(interactive=not locked)
+    if locked:
+        height = original_height(image, width) if image else round(int(width)*9/16)
+        return gr.update(value=height, interactive=False)
+    return gr.update(interactive=True)
 
 
 def build_moge_tab(default_output):
@@ -124,18 +137,22 @@ def build_moge_tab(default_output):
         with gr.Column():
             folder = gr.Textbox(value=str(Path(default_output)/'MoGe3'), label='출력 폴더 / Output folder')
             model = gr.Dropdown(choices=list(MODELS), value=next(iter(MODELS)), label='모델 / Model')
-            width = gr.Slider(512, 2048, value=1536, step=128, label='메시 해상도: 최대 가로 픽셀 / Mesh width')
+            lock_aspect = gr.Checkbox(value=True, label='원본 화면비 고정 / Lock original aspect ratio')
+            with gr.Row():
+                width = gr.Number(value=1536, minimum=256, maximum=4096, precision=0, label='출력 가로 px / Width')
+                height = gr.Number(value=864, minimum=128, maximum=8192, precision=0, interactive=False, label='출력 세로 px / Height')
+            gr.Markdown('메시 생성 해상도입니다. 원본 비율 고정 시 세로는 자동 계산됩니다. '
+                        '고정 해제 시 지정한 비율로 중앙 크롭합니다. 자동 렌더는 하지 않습니다.')
             tokens = gr.Slider(1200, 3600, value=1200, step=600, label='추론 디테일 / Inference tokens')
             edge = gr.Slider(.01, .20, value=.04, step=.01, label='깊이 경계 절단: 작을수록 구멍 증가 / Edge threshold')
             fbx = gr.Checkbox(value=True, label='Unreal용 메시 FBX + 카메라 FBX + 텍스처 저장')
     generate = gr.Button('MoGe 메시·Blender 생성 / Generate', variant='primary')
-    with gr.Row():
-        preview = gr.Image(label='활성 카메라 렌더 / Camera render', interactive=False)
-        depth = gr.Image(label='같은 카메라 뎁스맵 / Camera depth', interactive=False)
     files = gr.File(label='생성 파일 / Generated files', file_count='multiple')
     blend = gr.Textbox(label='생성된 Blender 파일 / Blender file', interactive=False)
     open_button = gr.Button('Blender에서 열기 / Open in Blender')
     status = gr.Markdown()
-    generate.click(generate_moge, inputs=[image, folder, model, width, tokens, edge, reference, fbx],
-                   outputs=[files, preview, depth, blend, status], concurrency_id='gpu_conversion', concurrency_limit=1)
+    for component in (image, width, lock_aspect):
+        component.change(resolution_settings, inputs=[image, width, lock_aspect], outputs=height, queue=False)
+    generate.click(generate_moge, inputs=[image, folder, model, width, height, lock_aspect, tokens, edge, reference, fbx],
+                   outputs=[files, blend, status], concurrency_id='gpu_conversion', concurrency_limit=1)
     open_button.click(open_blend, inputs=blend, outputs=status)

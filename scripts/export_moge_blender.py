@@ -1,4 +1,4 @@
-"""Build a UV-textured depth mesh, cameras, Blender renders and Unreal FBX."""
+"""Export a UV-textured depth mesh and cameras to Blender and Unreal FBX."""
 import argparse
 import json
 from pathlib import Path
@@ -82,8 +82,8 @@ def main():
                     ref['target_lens'], ref['target_sensor_width'], ref['target_shift']) if ref else source
     s.camera = target
     s.render.engine = 'BLENDER_EEVEE'; s.eevee.taa_render_samples = 32
-    s.render.resolution_x = min(1920, max(w, 1024))
-    s.render.resolution_y = round(s.render.resolution_x*h/w)
+    s.render.resolution_x = w
+    s.render.resolution_y = h
     s.render.resolution_percentage = 100
     s.render.pixel_aspect_x = 1; s.render.pixel_aspect_y = pixel_aspect
     s.render.film_transparent = True
@@ -105,9 +105,7 @@ def main():
         f'Model depth to scene scale: {scale}. Reference alignment uses median depth.\n'
         'Unreal: import FBX as Static Mesh; import texture.png; use Unlit, Texture RGB -> Emissive Color.\n')
     blend = out/f'{a.name}_moge3.blend'
-    s.render.filepath = str(out/'camera_preview.png')
     bpy.ops.wm.save_as_mainfile(filepath=str(blend))
-    bpy.ops.render.render(write_still=True)
     if a.fbx:
         # FBX understands Principled base-color textures. Unreal's final unlit
         # material must still be set explicitly, as documented in the guide.
@@ -130,21 +128,7 @@ def main():
         'reference_camera': bool(ref), 'pixel_aspect': pixel_aspect,
         'intrinsics': k.tolist(), 'camera_matrix': [list(row) for row in target.matrix_world]
     }, indent=2), encoding='utf-8')
-    # Render true camera-space Z, without persisting the temporary depth material.
-    dm = bpy.data.materials.new('Temporary camera Z'); dm.use_nodes = True
-    nd = dm.node_tree.nodes; nd.clear()
-    cd = nd.new('ShaderNodeCameraData'); em = nd.new('ShaderNodeEmission'); op = nd.new('ShaderNodeOutputMaterial')
-    dm.node_tree.links.new(cd.outputs['View Z Depth'], em.inputs['Color'])
-    dm.node_tree.links.new(em.outputs[0], op.inputs['Surface']); mesh.materials[0] = dm
-    s.render.image_settings.file_format = 'OPEN_EXR'; s.render.image_settings.color_depth = '32'
-    s.render.image_settings.color_mode = 'RGBA'; s.render.image_settings.exr_codec = 'ZIP'
-    s.render.filepath = str(out/'camera_depth_Z.exr')
-    bpy.ops.render.render(write_still=True)
-    depth_image = bpy.data.images.load(s.render.filepath, check_existing=False)
-    dw, dh = depth_image.size
-    rgba = np.empty(dw*dh*4, np.float32); depth_image.pixels.foreach_get(rgba)
-    np.save(out/'camera_depth_rgba.npy', rgba.reshape(dh, dw, 4)[::-1])
-    print('Blender, preview, depth and FBX export complete.', flush=True)
+    print('Blender and FBX export complete.', flush=True)
 
 
 if __name__ == '__main__':
